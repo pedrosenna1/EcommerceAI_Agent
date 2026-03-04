@@ -1,6 +1,6 @@
 from dotenv import load_dotenv
 load_dotenv()
-from fastapi import FastAPI, status, Request, Depends, HTTPException
+from fastapi import FastAPI, status, Request, Depends, HTTPException,responses
 from fastapi.middleware.cors import CORSMiddleware
 from agents.os import agent_os
 import os
@@ -96,10 +96,12 @@ async def root():
         }
     }
 
-@app.post("/ask",dependencies=[Depends(rate_limit)])
-async def ask_agent(data: AskRequest):
+async def process(data: AskRequest):
+    yield json.dumps({"status": "processing", "message": "Processando sua solicitação..."}) + "\n"
     tentativas = 0
     result = await agent_model.arun(data.question)
+
+    yield json.dumps({"status": "processing", "message": "Validando resposta..."}) + "\n"
     feedback = await agent_model_conference.arun(f"""Questao do usuario: {data.question},
                                       resposta do assistente: {result.content}""")
     
@@ -108,6 +110,7 @@ async def ask_agent(data: AskRequest):
     feedback_data = parse_feedback(feedback.content)
 
     while feedback_data.get('passou') == False and tentativas < 3:
+        yield json.dumps({"status": "processing", "message": f"Refinando resposta (tentativa {tentativas + 1})..."}) + "\n"
         result = await agent_model.arun(f"""Questao do usuario: {data.question},
                                       resposta do assistente: {result.content},
                                       feedback do conferencista: {feedback_data['feedback']}""")
@@ -118,7 +121,12 @@ async def ask_agent(data: AskRequest):
         feedback_data = parse_feedback(feedback.content)
         tentativas += 1
 
-    return {"answer": result.content}
+    yield json.dumps({"status": "done", "answer": result.content}) + "\n"
+
+
+@app.post("/ask",dependencies=[Depends(rate_limit)])
+async def ask_agent(data: AskRequest):
+    return responses.StreamingResponse(process(data), media_type="application/x-ndjson")
 
 @app.get('/health')
 async def health():

@@ -757,10 +757,56 @@
         body: JSON.stringify({ question: text })
       });
 
-      const data = await response.json();
-      const answer = data.answer ?? data.response ?? data.message ?? JSON.stringify(data);
+      if (!response.ok) {
+        removeTyping();
+        const errData = await response.json().catch(() => ({}));
+        appendMsg(errData.detail || `Erro ${response.status}`, 'bot');
+        return;
+      }
+
+      // Lê stream NDJSON linha por linha
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let statusDiv = null; // mensagem de status reutilizável
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // Processa cada linha JSON completa
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // guarda linha incompleta
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const chunk = JSON.parse(line);
+
+            if (chunk.status === 'processing') {
+              // Atualiza mensagem de status (substitui a anterior)
+              removeTyping();
+              if (!statusDiv) {
+                statusDiv = document.createElement('div');
+                statusDiv.className = 'msg bot status-msg';
+                statusDiv.style.cssText = 'font-style:italic; color:#888; font-size:.8rem;';
+                msgs.appendChild(statusDiv);
+              }
+              statusDiv.textContent = chunk.message;
+              msgs.scrollTop = msgs.scrollHeight;
+            }
+
+            if (chunk.status === 'done') {
+              // Remove status intermediário e mostra resposta final
+              if (statusDiv) { statusDiv.remove(); statusDiv = null; }
+              removeTyping();
+              appendMsg(chunk.answer, 'bot');
+            }
+          } catch (e) { /* linha não é JSON válido, ignora */ }
+        }
+      }
       removeTyping();
-      appendMsg(answer, 'bot');
     } catch (err) {
       removeTyping();
       appendMsg('Erro ao conectar com o servidor. Verifique se a API está rodando.', 'bot');

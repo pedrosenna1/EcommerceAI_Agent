@@ -42,8 +42,8 @@
           autocomplete="current-password"
           required
         />
-        {% if autentication %}
-          <p> Senha incorreta </p>
+        {% if error %}
+          <p style="color:#b42318; font-size:13px; margin-top:8px;">{{ error }}</p>
         {% endif %}
         <button type="submit">Entrar</button>
       </form>

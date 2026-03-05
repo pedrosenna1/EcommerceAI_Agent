@@ -7,10 +7,9 @@ import os
 import json
 import re
 import time
-import jwt
-
 from agents.data_agent import agent_model,agent_model_conference
-from pydantic import BaseModel
+from schemas.agent_request import AskRequest
+from core.security import verify_token
 
 app = FastAPI()
 
@@ -22,8 +21,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class AskRequest(BaseModel):
-    question: str
 
 # Rate limit: 5 requisições por minuto por IP
 RATE_LIMIT_MAX = 5
@@ -77,7 +74,7 @@ def rate_limit(request: Request):
 def parse_feedback(content: str) -> dict:
     """Extrai o JSON do content, mesmo que venha com markdown ou texto extra."""
     try:
-        # Tenta direto
+        
         return json.loads(content)
     except Exception:
         # Tenta extrair JSON de dentro de bloco markdown ```...```
@@ -87,35 +84,6 @@ def parse_feedback(content: str) -> dict:
         # Se não conseguir parsear, considera que passou para não travar
         return {'passou': True, 'feedback': content}
 
-def verify_token(request: Request):
-    token = request.cookies.get('access_token')
-    
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, 
-            detail='Token não encontrado.'
-        )
-    
-    if token.startswith('Bearer '):
-        token = token.replace('Bearer ', '').strip()
-        
-    try:
-        jwt.decode(
-            jwt=token, 
-            key=os.getenv('JWT_KEY'), 
-            algorithms=['HS256']
-        )
-        
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, 
-            detail='Token expirado.'
-        )
-    except jwt.InvalidTokenError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, 
-            detail='Token inválido.'
-        )
     
 @app.get('/',status_code=status.HTTP_200_OK)
 async def root():

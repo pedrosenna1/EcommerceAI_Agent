@@ -7,6 +7,7 @@ import os
 import json
 import re
 import time
+import jwt
 
 from agents.data_agent import agent_model,agent_model_conference
 from pydantic import BaseModel
@@ -15,7 +16,8 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://127.0.0.1:5000", "http://localhost:5000"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -84,7 +86,37 @@ def parse_feedback(content: str) -> dict:
             return json.loads(match.group())
         # Se não conseguir parsear, considera que passou para não travar
         return {'passou': True, 'feedback': content}
+
+def verify_token(request: Request):
+    token = request.cookies.get('access_token')
+    
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, 
+            detail='Token não encontrado.'
+        )
+    
+    if token.startswith('Bearer '):
+        token = token.replace('Bearer ', '').strip()
         
+    try:
+        jwt.decode(
+            jwt=token, 
+            key=os.getenv('JWT_KEY'), 
+            algorithms=['HS256']
+        )
+        
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, 
+            detail='Token expirado.'
+        )
+    except jwt.InvalidTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, 
+            detail='Token inválido.'
+        )
+    
 @app.get('/',status_code=status.HTTP_200_OK)
 async def root():
     return {
@@ -105,7 +137,7 @@ async def process(data: AskRequest):
     feedback = await agent_model_conference.arun(f"""Questao do usuario: {data.question},
                                       resposta do assistente: {result.content}""")
     
-    print("Feedback do conferencista:", feedback.content)
+    # print("Feedback do conferencista:", feedback.content)
 
     feedback_data = parse_feedback(feedback.content)
 
@@ -117,14 +149,14 @@ async def process(data: AskRequest):
 
         feedback = await agent_model_conference.arun(f"""Questao do usuario: {data.question},
                                       resposta do assistente: {result.content}""")
-        print("Feedback do conferencista:", feedback.content)
+        # print("Feedback do conferencista:", feedback.content)
         feedback_data = parse_feedback(feedback.content)
         tentativas += 1
 
     yield json.dumps({"status": "done", "answer": result.content}) + "\n"
 
 
-@app.post("/ask",dependencies=[Depends(rate_limit)])
+@app.post("/ask",dependencies=[Depends(rate_limit),Depends(verify_token)])
 async def ask_agent(data: AskRequest):
     return responses.StreamingResponse(process(data), media_type="application/x-ndjson")
 
